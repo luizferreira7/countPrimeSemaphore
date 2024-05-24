@@ -8,25 +8,32 @@
 #include <semaphore.h>
 #include <math.h>
 
-//#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+// O macOS não aceita semaforos sem nome, por isso é necessário usar o método sem_open() para iniciar em vez de sem_init()
+// Assim usei o ifdef para verificar se o ambiente é macOS ou não
+#ifdef __APPLE__
+#define MODE 0644
+sem_t *empty, *full, *global;
+#elif
+sem_t empty, full, global;
+#endif
 
-// Semáforos
-sem_t empty, full;
-pthread_mutex_t mutex;
 
+// Struct usada para passar os dados para a thread produtora
 typedef struct {
+    char *filename;
     int bufferSize;
     long long int *buffer;
-    char *filename;
 } ProducerArgs;
 
+// Struct usada para passar os dados para a thread consumidora
 typedef struct {
     int id;
-    long long int *buffer;
-    int bufferSize;
     int primes;
+    int bufferSize;
+    long long int *buffer;
 } ConsumerArgs;
 
+// Método que verifica se numero é primo
 int ehPrimo(long long int n) {
     if (n <= 1) return 0;
     if (n == 2) return 1;
@@ -34,55 +41,79 @@ int ehPrimo(long long int n) {
     for (int i = 3; i <= sqrt(n); i += 2) {
         if (n % i == 0) return 0;
     }
-    printf("\n%lld eh primo\n", n);
     return 1;
 }
 
+// Método que insere valor no buffer usando semaforo para sincronização e exclusão mutua
 void insertBuffer(long long int value, long long int *buffer, int bufferSize) {
-    static int in=0;
 
-    sem_wait(&empty); //aguarda slot vazio para inserir
-    pthread_mutex_lock(&mutex); //exclusao mutua entre produtores (aqui geral para log)
+    static int in = 0;
+
+#ifdef __APPLE__
+    sem_wait(empty);
+    sem_wait(global);
+#elif
+    sem_wait(&empty);
+    sem_wait(&global);
+#endif
 
     buffer[in] = value;
     in = (in + 1) % bufferSize;
 
-    for(int i=0; i<bufferSize; i++)
-        printf("%lld ", buffer[i]);
-    puts("");
+//    for(int i=0; i<bufferSize; i++)
+//        printf("%lld ", buffer[i]);
+//    puts("");
 
-    pthread_mutex_unlock(&mutex);
+#ifdef __APPLE__
+    sem_post(global);
+    sem_post(full);
+#elif
+    sem_post(&global);
     sem_post(&full);
+#endif
+
 }
 
+// Método que consome valor do buffer usando semaforo para sincronização e exclusão mutua
 long long int consumeBuffer(long long int *buffer, int bufferSize) {
-    long long int item;
-    static int out=0;
 
-    sem_wait(&full); //aguarda slot cheio para retirar
-    pthread_mutex_lock(&mutex); //exclusao mutua entre consumidores (aqui geral para log)
+    long long int item;
+    static int out = 0;
+
+#ifdef __APPLE__
+    sem_wait(full);
+    sem_wait(global);
+#elif
+    sem_wait(&full);
+    sem_wait(&global);
+#endif
 
     item = buffer[out];
-
-    printf("\n\n\n%lld\n\n\n", item);
 
     buffer[out] = 0;
     out = (out + 1) % bufferSize;
 
-    for(int i=0; i<bufferSize; i++)
-        printf("%lld ", buffer[i]);
-    puts("");
+//    for(int i=0; i<bufferSize; i++)
+//        printf("%lld ", buffer[i]);
+//    puts("");
 
-    pthread_mutex_unlock(&mutex);
-    sem_post(&empty); //sinaliza um slot vazio
+#ifdef __APPLE__
+    sem_post(global);
+    sem_post(empty);
+#elif
+    sem_post(&global);
+    sem_post(&empty);
+#endif
 
     return item;
 }
 
+// Método executado pela thread produtora
 void * producerTask(void * args) {
 
     ProducerArgs *pArgs = (ProducerArgs *) args;
 
+    // Prepara o arquivo para leitura
     FILE * file = fopen(pArgs -> filename, "rb");
     if(!file) {
         fprintf(stderr, "Erro na abertura do arquivo\n");
@@ -90,30 +121,47 @@ void * producerTask(void * args) {
     }
 
     long long int number;
-    while (fread(&number, sizeof(long long int), 1, file)) {
-        insertBuffer(number, pArgs->buffer, pArgs->bufferSize);
+    int read = (int32_t) fread(&number, sizeof(long long int), 1, file);
+
+    // Enquanto existir uma nova linha no arquivo ele insere o numero no buffer e tenta ler o proximo
+    while (read != 0) {
+        long long int temp = number;
+        read = (int32_t) fread(&number, sizeof(long long int), 1, file);
+
+        // So insere um novo valor no buffer enquanto existir uma nova linha para evitar que o numero d eprimos seja inserido
+        if (read != 0) {
+            insertBuffer(temp, pArgs->buffer, pArgs->bufferSize);
+        }
     }
 
+    // Após inserir todos os valores do arquivo a thread produtora insere -1 que é condição de parada para as threads consumidoras
     for (int i = 0; i < pArgs -> bufferSize; i++) {
         insertBuffer(-1, pArgs -> buffer, pArgs -> bufferSize);
     }
 
     fclose(file);
     free(args);
-    pthread_exit(NULL);
+
+    // Retorna o numero de primos do fim do arquivo
+    pthread_exit( (void *) number);
 }
 
+// Método executado pela thread consumidora
 void * consumerTask(void * args) {
 
     ConsumerArgs *cArgs = (ConsumerArgs *) args;
 
+    // Cria loop para consumir buffer
     while (1) {
+        // Consome um valor do buffer
         long long int number = consumeBuffer(cArgs -> buffer, cArgs -> bufferSize);
 
+        // Condição de parada
         if (number == -1) {
             break;
         }
 
+        // Verifica se o numero é primo
         cArgs -> primes += ehPrimo(number);
     }
 
@@ -137,14 +185,24 @@ int main(int argc, char* argv[]) {
 
     char* filename = argv[3];
 
+#ifdef __APPLE__
     // Inicializa semáforos e mutex
+    sem_unlink("sem_empty");
+    empty = sem_open("sem_empty", O_CREAT | O_EXCL, MODE, bufferSize);
+
+    sem_unlink("sem_full");
+    full = sem_open("sem_full", O_CREAT | O_EXCL, MODE, 0);
+
+    sem_unlink("sem_global");
+    global = sem_open("sem_global", O_CREAT | O_EXCL, MODE, 1);
+#elif
     sem_init(&empty, 0, bufferSize);
     sem_init(&full, 0, 0);
-    pthread_mutex_init(&mutex, NULL);
+    sem_init(&global, 0, 1);
+#endif
 
     pthread_t tid[threadsNumber + 1];
 
-    // Cria thread do producer
     ProducerArgs *pArgs = malloc(sizeof(ProducerArgs));
     if (pArgs == NULL) {
         fprintf(stderr, "Erro ao alocar memória");
@@ -155,6 +213,7 @@ int main(int argc, char* argv[]) {
     pArgs -> buffer = buffer;
     pArgs -> filename = filename;
 
+    // Cria thread produtora
     if (pthread_create(&tid[0], NULL, producerTask, pArgs)) {
         printf("Erro na criacao do thread produtor\n");
         exit(3);
@@ -182,9 +241,9 @@ int main(int argc, char* argv[]) {
 
     int id = 0;
     int primes = 0;
-
     int total = 0;
 
+    // Aguarda término de execução das threads consumidoras
     for (int i = 1; i< threadsNumber; i++) {
         ConsumerArgs *tempArgs;
         if (pthread_join(tid[i], (void*) &tempArgs)) {
@@ -192,6 +251,7 @@ int main(int argc, char* argv[]) {
             exit(6);
         }
 
+        // Verifica se thread encontrou mais primos que a ultima maior
         if (tempArgs -> primes > primes) {
             id = tempArgs -> id;
             primes = tempArgs -> primes;
@@ -202,13 +262,29 @@ int main(int argc, char* argv[]) {
         free(tempArgs);
     }
 
-    printf("\nForam encontrados: %d primos!", total);
-    printf("\nA thread vencedora foi: %d", id);
+
+    // Aguarda o término da thread produtora
+    int original = 0;
+    if (pthread_join(tid[0], (void*) &original)) {
+        fprintf(stderr, "Erro pthread_join()");
+        exit(6);
+    }
+
+    printf("O arquivo continha: %d primos!\n", original);
+    printf("Foram encontrados: %d primos!\n", total);
+    printf("A thread vencedora foi: %d\n", id);
 
     free(buffer);
+
+#ifdef __APPLE__
+    sem_close(empty);
+    sem_close(full);
+    sem_close(global);
+#elif
     sem_destroy(&empty);
     sem_destroy(&full);
-    pthread_mutex_destroy(&mutex);
+    sem_destroy(&global);
+#endif
 
     return 0;
 }
