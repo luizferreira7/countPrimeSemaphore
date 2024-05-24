@@ -51,10 +51,8 @@ void insertBuffer(long long int value, long long int *buffer, int bufferSize) {
 
 #ifdef __APPLE__
     sem_wait(empty);
-    sem_wait(global);
 #elif
     sem_wait(&empty);
-    sem_wait(&global);
 #endif
 
     buffer[in] = value;
@@ -65,10 +63,8 @@ void insertBuffer(long long int value, long long int *buffer, int bufferSize) {
 //    puts("");
 
 #ifdef __APPLE__
-    sem_post(global);
     sem_post(full);
 #elif
-    sem_post(&global);
     sem_post(&full);
 #endif
 
@@ -115,22 +111,27 @@ void * producerTask(void * args) {
 
     // Prepara o arquivo para leitura
     FILE * file = fopen(pArgs -> filename, "rb");
-    if(!file) {
+    if (!file) {
         fprintf(stderr, "Erro na abertura do arquivo\n");
         exit(4);
     }
 
+    // Le o primeiro numero do arquivo
     long long int number;
-    int read = (int32_t) fread(&number, sizeof(long long int), 1, file);
+    fread(&number, sizeof(long long int), 1, file);
 
-    // Enquanto existir uma nova linha no arquivo ele insere o numero no buffer e tenta ler o proximo
-    while (read != 0) {
+    // Loop para o produtor popular o buffer
+    while (1) {
         long long int temp = number;
-        read = (int32_t) fread(&number, sizeof(long long int), 1, file);
 
-        // So insere um novo valor no buffer enquanto existir uma nova linha para evitar que o numero d eprimos seja inserido
+        // Le o proximo numero do arquivo
+        int read = (int32_t) fread(&number, sizeof(long long int), 1, file);
+
+        // So insere um novo valor no buffer enquanto existir uma nova linha para evitar que o numero total de primos seja inserido (ultima linha)
         if (read != 0) {
             insertBuffer(temp, pArgs->buffer, pArgs->bufferSize);
+        } else {
+            break;
         }
     }
 
@@ -220,7 +221,7 @@ int main(int argc, char* argv[]) {
     }
 
     // Cria threads consumidoras
-    for (int i = 1; i < threadsNumber; i++) {
+    for (int i = 1; i < threadsNumber + 1; i++) {
 
         ConsumerArgs *cArgs = malloc(sizeof(ConsumerArgs));
         if (cArgs == NULL) {
@@ -244,12 +245,14 @@ int main(int argc, char* argv[]) {
     int total = 0;
 
     // Aguarda término de execução das threads consumidoras
-    for (int i = 1; i< threadsNumber; i++) {
+    for (int i = 1; i < threadsNumber + 1; i++) {
         ConsumerArgs *tempArgs;
         if (pthread_join(tid[i], (void*) &tempArgs)) {
             fprintf(stderr, "Erro pthread_join()");
             exit(6);
         }
+
+        printf("Thread: %d, encontrou: %d\n", tempArgs -> id, tempArgs -> primes);
 
         // Verifica se thread encontrou mais primos que a ultima maior
         if (tempArgs -> primes > primes) {
@@ -262,6 +265,8 @@ int main(int argc, char* argv[]) {
         free(tempArgs);
     }
 
+    printf("\nA thread vencedora foi: %d\n", id);
+    printf("Foram encontrados: %d primos!\n", total);
 
     // Aguarda o término da thread produtora
     int original = 0;
@@ -271,8 +276,6 @@ int main(int argc, char* argv[]) {
     }
 
     printf("O arquivo continha: %d primos!\n", original);
-    printf("Foram encontrados: %d primos!\n", total);
-    printf("A thread vencedora foi: %d\n", id);
 
     free(buffer);
 

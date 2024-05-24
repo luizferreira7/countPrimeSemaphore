@@ -30,8 +30,6 @@ void writeFile(const char* filename, long long int* numbers, int size, int prime
         fwrite(&numbers[i], sizeof(long long int), 1, file);
     }
 
-    free(numbers);
-
     fwrite(&primeCount, sizeof(long long int), 1, file);
 
     fclose(file);
@@ -81,6 +79,8 @@ int main(int argc, char* argv[]) {
     printf("\n%d primos\n", primeCount);
 
     writeFile(filename, numbers, N, primeCount);
+
+    free(numbers);
 
     return 0;
 }
