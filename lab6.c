@@ -12,15 +12,19 @@
 // Assim usei o ifdef para verificar se o ambiente é macOS ou não
 #ifdef __APPLE__
 #define MODE 0644
-sem_t *empty, *full, *global;
+sem_t *empty, *full;
 #elif
-sem_t empty, full, global;
+sem_t empty, full;
 #endif
 
+//#define PRINT
+
+pthread_mutex_t mutex;
 
 // Struct usada para passar os dados para a thread produtora
 typedef struct {
     char *filename;
+    int threadsCount;
     int bufferSize;
     long long int *buffer;
 } ProducerArgs;
@@ -28,7 +32,7 @@ typedef struct {
 // Struct usada para passar os dados para a thread consumidora
 typedef struct {
     int id;
-    int primes;
+    int qtdPrimes;
     int bufferSize;
     long long int *buffer;
 } ConsumerArgs;
@@ -54,14 +58,20 @@ void insertBuffer(long long int value, long long int *buffer, int bufferSize) {
 #elif
     sem_wait(&empty);
 #endif
+    pthread_mutex_lock(&mutex);
 
     buffer[in] = value;
     in = (in + 1) % bufferSize;
 
-//    for(int i=0; i<bufferSize; i++)
-//        printf("%lld ", buffer[i]);
-//    puts("");
+#ifdef PRINT
+    printf("\n");
+    printf("Thread produtora\n");
+    for(int i=0; i<bufferSize; i++)
+        printf("%lld ", buffer[i]);
+    printf("\n");
+#endif
 
+    pthread_mutex_unlock(&mutex);
 #ifdef __APPLE__
     sem_post(full);
 #elif
@@ -71,33 +81,35 @@ void insertBuffer(long long int value, long long int *buffer, int bufferSize) {
 }
 
 // Método que consome valor do buffer usando semaforo para sincronização e exclusão mutua
-long long int consumeBuffer(long long int *buffer, int bufferSize) {
+long long int consumeBuffer(int id, long long int *buffer, int bufferSize) {
 
     long long int item;
     static int out = 0;
 
 #ifdef __APPLE__
     sem_wait(full);
-    sem_wait(global);
 #elif
     sem_wait(&full);
-    sem_wait(&global);
 #endif
+    pthread_mutex_lock(&mutex);
 
     item = buffer[out];
 
     buffer[out] = 0;
     out = (out + 1) % bufferSize;
 
-//    for(int i=0; i<bufferSize; i++)
-//        printf("%lld ", buffer[i]);
-//    puts("");
+#ifdef PRINT
+    printf("\n");
+    printf("Thread consumidora %d\n", id);
+    for(int i=0; i<bufferSize; i++)
+        printf("%lld ", buffer[i]);
+    printf("\n");
+#endif
 
+    pthread_mutex_unlock(&mutex);
 #ifdef __APPLE__
-    sem_post(global);
     sem_post(empty);
 #elif
-    sem_post(&global);
     sem_post(&empty);
 #endif
 
@@ -129,14 +141,14 @@ void * producerTask(void * args) {
 
         // So insere um novo valor no buffer enquanto existir uma nova linha para evitar que o numero total de primos seja inserido (ultima linha)
         if (read != 0) {
-            insertBuffer(temp, pArgs->buffer, pArgs->bufferSize);
+            insertBuffer(temp, pArgs -> buffer, pArgs -> bufferSize);
         } else {
             break;
         }
     }
 
     // Após inserir todos os valores do arquivo a thread produtora insere -1 que é condição de parada para as threads consumidoras
-    for (int i = 0; i < pArgs -> bufferSize; i++) {
+    for (int i = 0; i < pArgs -> threadsCount; i++) {
         insertBuffer(-1, pArgs -> buffer, pArgs -> bufferSize);
     }
 
@@ -155,7 +167,7 @@ void * consumerTask(void * args) {
     // Cria loop para consumir buffer
     while (1) {
         // Consome um valor do buffer
-        long long int number = consumeBuffer(cArgs -> buffer, cArgs -> bufferSize);
+        long long int number = consumeBuffer(cArgs -> id, cArgs -> buffer, cArgs -> bufferSize);
 
         // Condição de parada
         if (number == -1) {
@@ -163,7 +175,7 @@ void * consumerTask(void * args) {
         }
 
         // Verifica se o numero é primo
-        cArgs -> primes += ehPrimo(number);
+        cArgs -> qtdPrimes += ehPrimo(number);
     }
 
     pthread_exit(cArgs);
@@ -171,38 +183,41 @@ void * consumerTask(void * args) {
 
 int main(int argc, char* argv[]) {
 
+    // Verifica argumentos passados
     if (argc < 4) {
         fprintf(stderr, "Argumento faltando: %s <threads> <buffer size> <nome do arquivo>\n", argv[0]);
         exit(1);
     }
 
-    int threadsNumber = atoi(argv[1]);
+    int threadsCount = atoi(argv[1]);
     int bufferSize = atoi(argv[2]);
+
     long long int *buffer = malloc(sizeof(long long int) * bufferSize);
-    if (buffer == NULL) {
+    if (!buffer) {
         fprintf(stderr, "Erro ao alocar memória");
         exit(2);
     }
 
-    char* filename = argv[3];
+    char *filename = argv[3];
 
+    // Inicializa semáforos nomeados para macOS
 #ifdef __APPLE__
-    // Inicializa semáforos e mutex
     sem_unlink("sem_empty");
     empty = sem_open("sem_empty", O_CREAT | O_EXCL, MODE, bufferSize);
 
     sem_unlink("sem_full");
     full = sem_open("sem_full", O_CREAT | O_EXCL, MODE, 0);
-
-    sem_unlink("sem_global");
-    global = sem_open("sem_global", O_CREAT | O_EXCL, MODE, 1);
 #elif
+    // Inicializa semáforos não nomeados
     sem_init(&empty, 0, bufferSize);
     sem_init(&full, 0, 0);
-    sem_init(&global, 0, 1);
 #endif
 
-    pthread_t tid[threadsNumber + 1];
+    // Inicializa mutex
+    pthread_mutex_init(&mutex, NULL);
+
+    // Inicializa threads
+    pthread_t tid[threadsCount + 1];
 
     ProducerArgs *pArgs = malloc(sizeof(ProducerArgs));
     if (pArgs == NULL) {
@@ -213,15 +228,16 @@ int main(int argc, char* argv[]) {
     pArgs -> bufferSize = bufferSize;
     pArgs -> buffer = buffer;
     pArgs -> filename = filename;
+    pArgs -> threadsCount = threadsCount;
 
     // Cria thread produtora
     if (pthread_create(&tid[0], NULL, producerTask, pArgs)) {
-        printf("Erro na criacao do thread produtor\n");
+        printf("Erro na criacao da thread produtora\n");
         exit(3);
     }
 
     // Cria threads consumidoras
-    for (int i = 1; i < threadsNumber + 1; i++) {
+    for (int i = 1; i < threadsCount + 1; i++) {
 
         ConsumerArgs *cArgs = malloc(sizeof(ConsumerArgs));
         if (cArgs == NULL) {
@@ -232,61 +248,64 @@ int main(int argc, char* argv[]) {
         cArgs -> id = i;
         cArgs -> buffer = buffer;
         cArgs -> bufferSize = bufferSize;
-        cArgs -> primes = 0;
+        cArgs -> qtdPrimes = 0;
 
         if (pthread_create(&tid[i], NULL, consumerTask, cArgs)) {
-            printf("Erro na criacao do thread produtor\n");
+            printf("Erro na criacao da thread consumidora\n");
             exit(3);
         }
     }
 
-    int id = 0;
-    int primes = 0;
-    int total = 0;
+    int winnerThreadId = 0;
+    int winnerThreadPrimes = 0;
+    int totalPrimes = 0;
 
     // Aguarda término de execução das threads consumidoras
-    for (int i = 1; i < threadsNumber + 1; i++) {
-        ConsumerArgs *tempArgs;
-        if (pthread_join(tid[i], (void*) &tempArgs)) {
+    for (int i = 1; i < threadsCount + 1; i++) {
+        ConsumerArgs *cArgs;
+        if (pthread_join(tid[i], (void*) &cArgs)) {
             fprintf(stderr, "Erro pthread_join()");
             exit(6);
         }
 
-        printf("Thread: %d, encontrou: %d\n", tempArgs -> id, tempArgs -> primes);
+        printf("Thread %d: %d primos\n", cArgs -> id, cArgs -> qtdPrimes);
 
         // Verifica se thread encontrou mais primos que a ultima maior
-        if (tempArgs -> primes > primes) {
-            id = tempArgs -> id;
-            primes = tempArgs -> primes;
+        if (cArgs -> qtdPrimes > winnerThreadPrimes) {
+            winnerThreadId = cArgs -> id;
+            winnerThreadPrimes = cArgs -> qtdPrimes;
         }
 
-        total += tempArgs -> primes;
+        totalPrimes += cArgs -> qtdPrimes;
 
-        free(tempArgs);
+        free(cArgs);
     }
 
-    printf("\nA thread vencedora foi: %d\n", id);
-    printf("Foram encontrados: %d primos!\n", total);
-
     // Aguarda o término da thread produtora
-    int original = 0;
-    if (pthread_join(tid[0], (void*) &original)) {
+    int originalQtdPrimes = 0;
+    if (pthread_join(tid[0], (void*) &originalQtdPrimes)) {
         fprintf(stderr, "Erro pthread_join()");
         exit(6);
     }
 
-    printf("O arquivo continha: %d primos!\n", original);
+    if (originalQtdPrimes != totalPrimes) {
+        fprintf(stderr, "Erro numero de primos encontrados difere do arquivo");
+        exit(7);
+    }
+
+    printf("\nThread vencedora: %d\n", winnerThreadId);
+    printf("Foram encontrados: %d primos!\n", totalPrimes);
+    printf("O arquivo continha: %d primos!\n", originalQtdPrimes);
 
     free(buffer);
+    pthread_mutex_destroy(&mutex);
 
 #ifdef __APPLE__
     sem_close(empty);
     sem_close(full);
-    sem_close(global);
 #elif
     sem_destroy(&empty);
     sem_destroy(&full);
-    sem_destroy(&global);
 #endif
 
     return 0;
