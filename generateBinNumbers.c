@@ -7,7 +7,8 @@
 #include <time.h>
 #include <math.h>
 
-int ehPrimo(long long int n) {
+// Metodo que verifica se é um numero primo
+int ehPrimo(int n) {
     if (n <= 1) return 0;
     if (n == 2) return 1;
     if (n % 2 == 0) return 0;
@@ -17,27 +18,29 @@ int ehPrimo(long long int n) {
     return 1;
 }
 
-void writeFile(const char* filename, long long int* numbers, int size, int primeCount) {
+// Metodo que escreve vetor dos numeros em um arquivo
+void writeFile(const char* filename, int* numbers, int size, int primeCount) {
 
     FILE* file = fopen(filename, "wb");
-
     if (file == NULL) {
         fprintf(stderr, "Erro ao abrir o arquivo");
         exit(3);
     }
 
     for (int i = 0; i < size; i++) {
-        fwrite(&numbers[i], sizeof(long long int), 1, file);
+        fwrite(&numbers[i], sizeof(int), 1, file);
     }
 
-    fwrite(&primeCount, sizeof(long long int), 1, file);
+    // Adiciona numero de primos ao final do arquivo
+    fwrite(&primeCount, sizeof(int), 1, file);
 
     fclose(file);
 }
 
-long long int* generateNumbers(int N) {
-    long long int * numbers = malloc(sizeof(long long int) * (N + 1));
+// Metodo que gera vetor de numeros aleatorios
+int* generateNumbers(int N) {
 
+    int * numbers = malloc(sizeof(int) * (N + 1));
     if (numbers == NULL) {
         fprintf(stderr, "Erro ao alocar memória");
         exit(2);
@@ -46,7 +49,7 @@ long long int* generateNumbers(int N) {
     srand(time(NULL));
 
     for (int i = 0; i < N; i++) {
-        long long int number = rand();
+        int number = rand();
         numbers[i] = number;
     }
 
@@ -63,14 +66,13 @@ int main(int argc, char* argv[]) {
     int N = atoi(argv[1]);
     const char* filename = argv[2];
 
-    long long int * numbers = generateNumbers(N);
+    int * numbers = generateNumbers(N);
 
     int primeCount = 0;
 
+    // Verifica quantos numeros do vetor sao primos
     for (int i = 0; i < N; i++) {
-        if (ehPrimo(numbers[i])) {
-            primeCount += 1;
-        }
+        primeCount += ehPrimo(numbers[i]);
     }
 
     printf("\n%d primos\n", primeCount);

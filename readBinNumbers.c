@@ -20,9 +20,10 @@ int main(int argc, char* argv[]) {
         exit(4);
     }
 
-    long long int number;
-    while (fread(&number, sizeof(long long int), 1, file)) {
-        printf("\n%lld", number);
+    int number;
+    while (fread(&number, sizeof(int), 1, file)) {
+        printf("%d\n", number);
     }
+
     return 0;
 }

@@ -8,7 +8,7 @@
 #include <semaphore.h>
 #include <math.h>
 
-// O macOS não aceita semaforos sem nome, por isso é necessário usar o método sem_open() para iniciar em vez de sem_init()
+// O macOS não aceita semaforos não nomeados, por isso é necessário usar o método sem_open() para iniciar em vez de sem_init()
 // Assim usei o ifdef para verificar se o ambiente é macOS ou não
 #ifdef __APPLE__
 #define MODE 0644
@@ -19,6 +19,7 @@ sem_t empty, full;
 
 //#define PRINT
 
+// Declara mutex para exclusão mutua
 pthread_mutex_t mutex;
 
 // Struct usada para passar os dados para a thread produtora
@@ -26,7 +27,7 @@ typedef struct {
     char *filename;
     int threadsCount;
     int bufferSize;
-    long long int *buffer;
+    int *buffer;
 } ProducerArgs;
 
 // Struct usada para passar os dados para a thread consumidora
@@ -34,11 +35,11 @@ typedef struct {
     int id;
     int qtdPrimes;
     int bufferSize;
-    long long int *buffer;
+    int *buffer;
 } ConsumerArgs;
 
 // Método que verifica se numero é primo
-int ehPrimo(long long int n) {
+int ehPrimo(int n) {
     if (n <= 1) return 0;
     if (n == 2) return 1;
     if (n % 2 == 0) return 0;
@@ -48,8 +49,8 @@ int ehPrimo(long long int n) {
     return 1;
 }
 
-// Método que insere valor no buffer usando semaforo para sincronização e exclusão mutua
-void insertBuffer(long long int value, long long int *buffer, int bufferSize) {
+// Método que insere valor no buffer usando semaforo para sincronização e mutex para exclusão mutua
+void insertBuffer(int value, int *buffer, int bufferSize) {
 
     static int in = 0;
 
@@ -58,6 +59,7 @@ void insertBuffer(long long int value, long long int *buffer, int bufferSize) {
 #elif
     sem_wait(&empty);
 #endif
+
     pthread_mutex_lock(&mutex);
 
     buffer[in] = value;
@@ -72,6 +74,7 @@ void insertBuffer(long long int value, long long int *buffer, int bufferSize) {
 #endif
 
     pthread_mutex_unlock(&mutex);
+
 #ifdef __APPLE__
     sem_post(full);
 #elif
@@ -80,10 +83,10 @@ void insertBuffer(long long int value, long long int *buffer, int bufferSize) {
 
 }
 
-// Método que consome valor do buffer usando semaforo para sincronização e exclusão mutua
-long long int consumeBuffer(int id, long long int *buffer, int bufferSize) {
+// Método que consome valor do buffer usando semaforo para sincronização e mutex para exclusão mutua
+int consumeBuffer(int id, int *buffer, int bufferSize) {
 
-    long long int item;
+    int item;
     static int out = 0;
 
 #ifdef __APPLE__
@@ -91,6 +94,7 @@ long long int consumeBuffer(int id, long long int *buffer, int bufferSize) {
 #elif
     sem_wait(&full);
 #endif
+
     pthread_mutex_lock(&mutex);
 
     item = buffer[out];
@@ -107,6 +111,7 @@ long long int consumeBuffer(int id, long long int *buffer, int bufferSize) {
 #endif
 
     pthread_mutex_unlock(&mutex);
+
 #ifdef __APPLE__
     sem_post(empty);
 #elif
@@ -129,15 +134,16 @@ void * producerTask(void * args) {
     }
 
     // Le o primeiro numero do arquivo
-    long long int number;
-    fread(&number, sizeof(long long int), 1, file);
+    int number;
+    fread(&number, sizeof(int), 1, file);
 
     // Loop para o produtor popular o buffer
     while (1) {
-        long long int temp = number;
+        // Variavel temporaria para permitir a leitura do proximo numero do arquivo
+        int temp = number;
 
         // Le o proximo numero do arquivo
-        int read = (int32_t) fread(&number, sizeof(long long int), 1, file);
+        int read = (int32_t) fread(&number, sizeof(int), 1, file);
 
         // So insere um novo valor no buffer enquanto existir uma nova linha para evitar que o numero total de primos seja inserido (ultima linha)
         if (read != 0) {
@@ -156,7 +162,7 @@ void * producerTask(void * args) {
     free(args);
 
     // Retorna o numero de primos do fim do arquivo
-    pthread_exit( (void *) number);
+    pthread_exit( (void *) (size_t) number);
 }
 
 // Método executado pela thread consumidora
@@ -167,7 +173,7 @@ void * consumerTask(void * args) {
     // Cria loop para consumir buffer
     while (1) {
         // Consome um valor do buffer
-        long long int number = consumeBuffer(cArgs -> id, cArgs -> buffer, cArgs -> bufferSize);
+        int number = consumeBuffer(cArgs -> id, cArgs -> buffer, cArgs -> bufferSize);
 
         // Condição de parada
         if (number == -1) {
@@ -192,7 +198,7 @@ int main(int argc, char* argv[]) {
     int threadsCount = atoi(argv[1]);
     int bufferSize = atoi(argv[2]);
 
-    long long int *buffer = malloc(sizeof(long long int) * bufferSize);
+    int *buffer = malloc(sizeof(int) * bufferSize);
     if (!buffer) {
         fprintf(stderr, "Erro ao alocar memória");
         exit(2);
@@ -208,7 +214,7 @@ int main(int argc, char* argv[]) {
     sem_unlink("sem_full");
     full = sem_open("sem_full", O_CREAT | O_EXCL, MODE, 0);
 #elif
-    // Inicializa semáforos não nomeados
+    // Inicializa semáforos
     sem_init(&empty, 0, bufferSize);
     sem_init(&full, 0, 0);
 #endif
