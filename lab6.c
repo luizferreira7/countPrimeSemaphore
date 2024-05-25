@@ -13,7 +13,7 @@
 #ifdef __APPLE__
 #define MODE 0644
 sem_t *empty, *full;
-#elif
+#else
 sem_t empty, full;
 #endif
 
@@ -56,7 +56,7 @@ void insertBuffer(int value, int *buffer, int bufferSize) {
 
 #ifdef __APPLE__
     sem_wait(empty);
-#elif
+#else
     sem_wait(&empty);
 #endif
 
@@ -77,7 +77,7 @@ void insertBuffer(int value, int *buffer, int bufferSize) {
 
 #ifdef __APPLE__
     sem_post(full);
-#elif
+#else
     sem_post(&full);
 #endif
 
@@ -91,7 +91,7 @@ int consumeBuffer(int id, int *buffer, int bufferSize) {
 
 #ifdef __APPLE__
     sem_wait(full);
-#elif
+#else
     sem_wait(&full);
 #endif
 
@@ -114,7 +114,7 @@ int consumeBuffer(int id, int *buffer, int bufferSize) {
 
 #ifdef __APPLE__
     sem_post(empty);
-#elif
+#else
     sem_post(&empty);
 #endif
 
@@ -213,7 +213,7 @@ int main(int argc, char* argv[]) {
 
     sem_unlink("sem_full");
     full = sem_open("sem_full", O_CREAT | O_EXCL, MODE, 0);
-#elif
+#else
     // Inicializa semáforos
     sem_init(&empty, 0, bufferSize);
     sem_init(&full, 0, 0);
@@ -309,7 +309,7 @@ int main(int argc, char* argv[]) {
 #ifdef __APPLE__
     sem_close(empty);
     sem_close(full);
-#elif
+#else
     sem_destroy(&empty);
     sem_destroy(&full);
 #endif
