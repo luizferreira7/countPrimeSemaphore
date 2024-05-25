@@ -47,9 +47,6 @@ long long int* generateNumbers(int N) {
 
     for (int i = 0; i < N; i++) {
         long long int number = rand();
-        while (number == 0) {
-            number = rand();
-        }
         numbers[i] = number;
     }
 
