@@ -266,6 +266,13 @@ int main(int argc, char* argv[]) {
     int winnerThreadPrimes = 0;
     int totalPrimes = 0;
 
+    // Aguarda o término da thread produtora
+    int originalQtdPrimes = 0;
+    if (pthread_join(tid[0], (void*) &originalQtdPrimes)) {
+        fprintf(stderr, "Erro pthread_join()");
+        exit(6);
+    }
+
     // Aguarda término de execução das threads consumidoras
     for (int i = 1; i < threadsCount + 1; i++) {
         ConsumerArgs *cArgs;
@@ -287,15 +294,8 @@ int main(int argc, char* argv[]) {
         free(cArgs);
     }
 
-    // Aguarda o término da thread produtora
-    int originalQtdPrimes = 0;
-    if (pthread_join(tid[0], (void*) &originalQtdPrimes)) {
-        fprintf(stderr, "Erro pthread_join()");
-        exit(6);
-    }
-
     if (originalQtdPrimes != totalPrimes) {
-        fprintf(stderr, "Erro numero de primos encontrados difere do arquivo");
+        fprintf(stderr, "Erro numero de primos encontrados difere do arquivo: %d", originalQtdPrimes);
         exit(7);
     }
 
@@ -314,5 +314,5 @@ int main(int argc, char* argv[]) {
     sem_destroy(&full);
 #endif
 
-    return 0;
+    return totalPrimes;
 }
