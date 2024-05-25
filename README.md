@@ -17,7 +17,7 @@ Roteiro:
 Rode os comandos a seguir para compilar as classes necessárias
 
 ``` bash
-❯ gcc -o gera generateBinNumbers.c -lm
+gcc -o gera generateBinNumbers.c -lm
 ```
 
 ``` bash
