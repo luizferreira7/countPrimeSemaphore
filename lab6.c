@@ -314,5 +314,5 @@ int main(int argc, char* argv[]) {
     sem_destroy(&full);
 #endif
 
-    return totalPrimes;
+    return 0;
 }

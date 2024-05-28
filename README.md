@@ -60,3 +60,5 @@ Exemplo:
 ``` bash
 ./read primos
 ```
+
+OBS: Alterei o codigo após o prazo apenas para alterar o return da main para 0, pois eu tinha usado como função de testes, conversei com a professora Silvana sobre e ela autorizou.
